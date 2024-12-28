@@ -53,9 +53,39 @@ jobs:
       run: mkdir -p msic
       shell: pwsh
 
+    - name: Modify main.py for stdin
+      run: |
+        $content = @"
+        #!/usr/bin/python
+        # coding:utf-8
+        from liveMan import DouyinLiveWebFetcher
+        if __name__ == '__main__':
+            try:
+                live_id = input("请输入直播间ID号: ")
+            except:
+                # 如果stdin不可用，使用默认值
+                live_id = ""
+            DouyinLiveWebFetcher(live_id).start()
+        "@
+        Set-Content -Path "main.py" -Value $content -Encoding UTF8
+      shell: pwsh
+
+    - name: Get version from tag
+      id: get_version
+      run: |
+        if ("${{ github.ref }}".StartsWith("refs/tags/")) {
+          $version = "${{ github.ref }}".Replace("refs/tags/v", "")
+        } else {
+          $version = "dev"
+        }
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+
     - name: Build with PyInstaller
       run: |
         pyinstaller --noconfirm --onefile --windowed `
+          --name "DouyinLiveTTS-${{ steps.get_version.outputs.VERSION }}" `
+          --icon "dy-dm.ico" `
           --add-data "sign.js;." `
           --add-data "sign_v0.js;." `
           --add-data "msic;msic" `
@@ -74,7 +104,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: DouyinLiveTTS-windows
+        name: DouyinLiveTTS-windows-${{ steps.get_version.outputs.VERSION }}
         path: |
           dist/*
         if-no-files-found: error
@@ -89,9 +119,12 @@ jobs:
           
           ### 更新内容
           - 自动构建发布
+          - 增加版本号
+          - 增加应用图标
+          - 修复stdin问题
           
           ### 下载
-          - Windows可执行文件
+          - Windows可执行文件 (版本号：${{ steps.get_version.outputs.VERSION }})
         files: |
           dist/*.exe
         draft: false
