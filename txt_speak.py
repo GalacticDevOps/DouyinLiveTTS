@@ -66,7 +66,7 @@ def play_speech_thread(text, output_mp3, v_num):
             print(f"删除文件时出错: {e}")
 
 def play_audio_with_playsound(wav_file):
-    playsound(wav_file)
+    play_audio(wav_file)
 
 def list_audio_devices():
     """列出所有音频设备"""
@@ -75,7 +75,7 @@ def list_audio_devices():
     for i, device in enumerate(devices):
         print(f"{i}: {device['name']}")
 
-def play_audio(wav_file, device_id=4):
+def play_audio(wav_file, device_id=42):
     """播放音频文件"""
     try:
         data, samplerate = sf.read(wav_file)

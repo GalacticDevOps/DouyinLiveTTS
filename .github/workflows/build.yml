@@ -24,9 +24,12 @@ jobs:
       with:
         node-version: '18'
 
-    - name: Install build tools
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Install Visual Studio Build Tools
       run: |
-        npm install -g windows-build-tools
+        choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
       shell: pwsh
 
     - name: Install dependencies
