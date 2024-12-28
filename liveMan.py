@@ -1,6 +1,11 @@
 #!/usr/bin/python
 # coding:utf-8
 
+# @FileName:    liveMan.py
+# @Time:        2024/1/2 21:51
+# @Author:      bubu
+# @Project:     douyinLiveWebFetcher
+
 import codecs
 import gzip
 import hashlib
@@ -114,9 +119,11 @@ class DouyinLiveWebFetcher:
         self.chat_checkbox = None
         self.gift_checkbox = None
         self.follow_checkbox = None
+        self.welcome_checkbox = None
         self.speech_enabled = False
         self.gift_enabled = False
         self.follow_enabled = False
+        self.welcome_enabled = False
         self.ws_thread = None
 
     def gui(self):
@@ -185,6 +192,15 @@ class DouyinLiveWebFetcher:
                                             selectcolor="red")
         self.follow_checkbox.pack(side=tk.LEFT, padx=5)
 
+        # 在框架中添加进场复选框
+        self.welcome_checkbox = tk.Checkbutton(checkbox_frame, text="进场",
+                                              variable=tk.BooleanVar(value=self.welcome_enabled),
+                                              command=self.welcome_speech,
+                                              bg="black", fg="white",
+                                              activebackground="red",
+                                              selectcolor="red")
+        self.welcome_checkbox.pack(side=tk.LEFT, padx=5)
+
         # 添加一个按钮
         # button = tk.Button(window, text="关闭", command=window.quit)
         # button.pack(pady=10)
@@ -212,6 +228,13 @@ class DouyinLiveWebFetcher:
         """
         self.follow_enabled = not self.follow_enabled
         print(f"关注播报 {'启用' if self.follow_enabled else '禁用'}")
+
+    def welcome_speech(self):
+        """
+        切换关注播报的启用状态
+        """
+        self.welcome_enabled = not self.welcome_enabled
+        print(f"进场播报 {'启用' if self.welcome_enabled else '禁用'}")
 
     def start(self):
         threading.Thread(target=self._connectWebSocket, daemon=True).start()
@@ -424,6 +447,14 @@ class DouyinLiveWebFetcher:
         # text = "感谢" + user_name + f"给主播点了{count_cn}个赞。"
         # threading.Thread(target=play_speech_thread, args=(text, output_file)).start()
 
+    def handle_welcome_message(self, user_name):
+        # 生成唯一的语音文件名
+        v_num = random.randint(0, 5)
+        unique_id = str(uuid.uuid4())
+        output_file = f"msic/MemberMsg_{unique_id}.mp3"
+        text = f"欢迎{user_name} 进入了直播间。"
+        play_speech_thread(text, output_file, v_num=v_num)
+
     def _parseMemberMsg(self, payload):
         '''进入直播间消息'''
         message = MemberMessage().parse(payload)
@@ -431,12 +462,13 @@ class DouyinLiveWebFetcher:
         user_id = message.user.id
         gender = ["女", "男"][message.user.gender]
         print(f"【进场msg】[{user_id}][{gender}]{user_name} 进入了直播间")
-        # 自动播报
-        # 生成唯一的文件名
-        # unique_id = str(uuid.uuid4())
-        # output_file = f"msic/MemberMsg_{unique_id}.mp3"
-        # text = f"欢迎{user_name}进入直播间。"
-        # threading.Thread(target=play_speech_thread, args=(text, output_file)).start()
+        if self.welcome_enabled:
+            if self.ws_thread is not None and self.ws_thread.is_alive():
+                print("当前线程正在处理消息，跳过新线程创建。")
+                return
+            # 启动新线程处理消息
+            self.ws_thread = threading.Thread(target=self.handle_welcome_message, args=(user_name,))
+            self.ws_thread.start()
 
     def handle_follow_message(self, user_name):
         # 生成唯一的语音文件名
