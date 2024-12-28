@@ -60,3 +60,5 @@ A simple tool for playing Tik Tok barrage
 ## ⭐  Star History or Repobeats
 
 [![Star History Chart](https://api.star-history.com/svg?repos=GalacticDevOps/DouyinLiveTTS&type=Date)](https://star-history.com/#GalacticDevOps/DouyinLiveTTS&Date)
+
+![Alt](https://repobeats.axiom.co/api/embed/e34bfcb8715d7f8609d437b382e4db74eba8bc13.svg "Repobeats analytics image")
