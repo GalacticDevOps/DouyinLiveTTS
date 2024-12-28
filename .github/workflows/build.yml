@@ -8,40 +8,68 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.8']
-
+    runs-on: windows-latest
+    
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.8
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.8'
         cache: 'pip'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install build tools
+      run: |
+        npm install -g windows-build-tools
+      shell: pwsh
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install wheel setuptools
+        pip install requests==2.32.3
+        pip install betterproto==2.0.0b6
+        pip install websocket-client==1.7.0
+        pip install mini_racer==0.12.4
+        pip install edge_tts==7.0.0
+        pip install playsound==1.2.2
+        pip install sounddevice==0.5.1
+        pip install soundfile==0.12.1
         pip install pyinstaller
+      shell: pwsh
+
+    - name: Create msic directory
+      run: mkdir -p msic
+      shell: pwsh
 
     - name: Build with PyInstaller
       run: |
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          pyinstaller --onefile --add-data "sign.js;." --add-data "msic;msic" main.py
-        else
-          pyinstaller --onefile --add-data "sign.js:." --add-data "msic:msic" main.py
-        fi
-      shell: bash
+        pyinstaller --noconfirm --onefile --windowed `
+          --add-data "sign.js;." `
+          --add-data "sign_v0.js;." `
+          --add-data "msic;msic" `
+          --add-data "protobuf;protobuf" `
+          --hidden-import=playsound `
+          --hidden-import=edge_tts `
+          --hidden-import=sounddevice `
+          --hidden-import=soundfile `
+          --hidden-import=mini_racer `
+          --hidden-import=edge_tts.constants `
+          --hidden-import=edge_tts.exceptions `
+          --hidden-import=edge_tts.communicate `
+          main.py
+      shell: pwsh
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: DouyinLiveTTS-${{ matrix.os }}
+        name: DouyinLiveTTS-windows
         path: |
           dist/*
         if-no-files-found: error
