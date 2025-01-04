@@ -9,6 +9,6 @@
 from liveMan import DouyinLiveWebFetcher
 
 if __name__ == '__main__':
-    live_id = input("请输入直播间ID号: ")
-    # live_id = "565075835478"
-    DouyinLiveWebFetcher(live_id).start()
+    # live_id = input("请输入直播间ID号: ")
+    live_id = "123344047824"
+    DouyinLiveWebFetcher().start_gui()

@@ -102,7 +102,7 @@ def generateMsToken(length=107):
 
 class DouyinLiveWebFetcher:
 
-    def __init__(self, live_id):
+    def __init__(self):
         """
         直播间弹幕抓取对象
         :param live_id: 直播间的直播id，打开直播间web首页的链接如：https://live.douyin.com/261378947940，
@@ -110,7 +110,7 @@ class DouyinLiveWebFetcher:
         """
         self.__ttwid = None
         self.__room_id = None
-        self.live_id = live_id
+        self.live_id = None
         self.live_url = "https://live.douyin.com/"
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " \
                           "Chrome/120.0.0.0 Safari/537.36"
@@ -120,6 +120,7 @@ class DouyinLiveWebFetcher:
         self.gift_checkbox = None
         self.follow_checkbox = None
         self.welcome_checkbox = None
+        self.room_id_entry = None
         self.speech_enabled = False
         self.gift_enabled = False
         self.follow_enabled = False
@@ -135,7 +136,7 @@ class DouyinLiveWebFetcher:
         window.title("抖音直播信息")
 
         # 设置窗口大小
-        width, height = 250, 80  # 窗口的宽和高
+        width, height = 300, 120  # 窗口的宽和高
 
         # 获取屏幕宽度和高度
         screen_width = window.winfo_screenwidth()
@@ -153,9 +154,24 @@ class DouyinLiveWebFetcher:
         window.configure(bg="red")
         # 禁止调整窗口大小
         window.resizable(False, False)
-
         # window.overrideredirect(True)
         window.attributes("-topmost", True)
+
+        # 创建一个 Frame 容器
+        entry_frame = tk.Frame(window, bg="black")
+        entry_frame.pack(pady=5)
+
+        # 创建 room_id_entry 输入框
+        self.room_id_entry = tk.Entry(entry_frame, font=("Arial", 12), fg="gray")
+        self.room_id_entry.insert(0, "请输入直播间ID")
+        self.room_id_entry.pack(side="left", padx=5)
+
+        # 创建开始按钮
+        self.start_button = tk.Button(entry_frame, text="开始", font=("Arial", 12), bg="black", fg="white",command=self.start)
+        self.start_button.pack(side="left")
+
+        self.stop_button = tk.Button(entry_frame, text="停止", font=("Arial", 12), bg="black", fg="white",command=self.stop)
+        self.stop_button.pack(side="left")
 
         # 创建标签来显示 `display_long` 数据（设置不透明背景）
         self.label = tk.Label(window, text="直播间人数", font=("Arial", 16), bg="black", fg="white")
@@ -208,6 +224,18 @@ class DouyinLiveWebFetcher:
         # 运行主循环
         window.mainloop()
 
+    def start(self):
+        room_id = self.room_id_entry.get()
+
+        # 判断输入的直播间ID是否为数字
+        if not room_id.isdigit():
+            print("输入错误", "直播间ID必须是数字")
+            return  # 如果不是数字，则不继续执行后续操作
+
+        print(f"直播间ID: {room_id}")  # 测试用的函数
+        self.live_id = room_id
+        threading.Thread(target=self._connectWebSocket, daemon=True).start()
+
     def toggle_speech(self):
         """
         切换聊天播报的启用状态
@@ -236,8 +264,8 @@ class DouyinLiveWebFetcher:
         self.welcome_enabled = not self.welcome_enabled
         print(f"进场播报 {'启用' if self.welcome_enabled else '禁用'}")
 
-    def start(self):
-        threading.Thread(target=self._connectWebSocket, daemon=True).start()
+    def start_gui(self):
+        # threading.Thread(target=self._connectWebSocket, daemon=True).start()
         self.gui()
 
     def stop(self):
@@ -292,9 +320,12 @@ class DouyinLiveWebFetcher:
 
     def _connectWebSocket(self):
         """
-        连接抖音直播间websocket服务器，请求直播间数据，支持自动重连。
+        连接抖音直播间websocket服务器，请求直播间数据，支持自动重连，但最多重试三次。
         """
-        while True:
+        max_retries = 3  # 最大重试次数
+        retries = 0  # 当前重试次数
+
+        while retries < max_retries:
             try:
                 wss = ("wss://webcast5-ws-web-hl.douyin.com/webcast/im/push/v2/?app_name=douyin_web"
                        "&version_code=180800&webcast_sdk_version=1.0.14-beta.0"
@@ -329,11 +360,17 @@ class DouyinLiveWebFetcher:
                 print("尝试连接到 WebSocket...")
                 self.ws.run_forever()
 
-            except Exception as e:
-                print(f"WebSocket连接异常: {e}")
+                # 如果连接成功，则退出循环
+                break
 
-            print("尝试重新连接...")
-            time.sleep(5)  # 等待 5 秒后重试
+            except Exception as e:
+                retries += 1
+                print(f"WebSocket连接异常: {e}")
+                if retries < max_retries:
+                    print(f"尝试重新连接... ({retries}/{max_retries})")
+                    time.sleep(1)  # 等待 1 秒后重试
+                else:
+                    print("达到最大重试次数，无法连接WebSocket。")
 
     def _wsOnOpen(self, ws):
         """
