@@ -15,7 +15,7 @@ import re
 import string
 import subprocess
 import sys
-import time
+import queue
 import urllib.parse
 from contextlib import contextmanager
 import tkinter as tk
@@ -108,6 +108,8 @@ class DouyinLiveWebFetcher:
         :param live_id: 直播间的直播id，打开直播间web首页的链接如：https://live.douyin.com/261378947940，
                         其中的261378947940即是live_id
         """
+        self.stop_button = None
+        self.start_button = None
         self.__ttwid = None
         self.__room_id = None
         self.live_id = None
@@ -126,6 +128,12 @@ class DouyinLiveWebFetcher:
         self.follow_enabled = False
         self.welcome_enabled = False
         self.ws_thread = None
+        self.message_timeout = 3  # 超时时间为10秒
+        self.timer = None  # 超时计时器
+        self.reconnect_lock = threading.Lock()  # 防止多线程同时触发重连
+        self.task_queue = queue.Queue(maxsize=100)  # 创建任务队列
+        self.consumer_thread = threading.Thread(target=self._process_tasks, daemon=True)  # 消费者线程
+        self.consumer_thread.start()  # 启动消费者线程
 
     def gui(self):
         print("初始化gui窗口！")
@@ -140,7 +148,7 @@ class DouyinLiveWebFetcher:
 
         # 获取屏幕宽度和高度
         screen_width = window.winfo_screenwidth()
-        screen_height = window.winfo_screenheight()
+        # screen_height = window.winfo_screenheight()
 
         # 计算窗口位置：水平居中，上方稍微靠下（以屏幕高度的1/4为例）
         x = (screen_width - width) // 2
@@ -225,6 +233,9 @@ class DouyinLiveWebFetcher:
         window.mainloop()
 
     def start(self):
+        """
+        启动 WebSocket 连接，并初始化新的任务队列和消费者线程。
+        """
         room_id = self.room_id_entry.get()
 
         # 判断输入的直播间ID是否为数字
@@ -232,8 +243,23 @@ class DouyinLiveWebFetcher:
             print("输入错误", "直播间ID必须是数字")
             return  # 如果不是数字，则不继续执行后续操作
 
-        print(f"直播间ID: {room_id}")  # 测试用的函数
+        # 更新直播间 ID
+        print(f"直播间ID: {room_id}")
         self.live_id = room_id
+        self.__room_id = None  # 清除缓存的 room_id，确保重新获取
+
+        # 如果已有消费者线程，则停止并清理
+        if hasattr(self, 'consumer_thread') and self.consumer_thread.is_alive():
+            print("正在清理之前的消费者线程和任务队列...")
+            self.stop()
+
+        # 创建新的任务队列和消费者线程
+        self.task_queue = queue.Queue(maxsize=100)  # 新的任务队列
+        self.consumer_thread = threading.Thread(target=self._process_tasks, daemon=True)
+        self.consumer_thread.start()  # 启动消费者线程
+        print("新的任务队列和消费者线程已启动。")
+
+        # 启动 WebSocket 连接
         threading.Thread(target=self._connectWebSocket, daemon=True).start()
 
     def toggle_speech(self):
@@ -269,7 +295,45 @@ class DouyinLiveWebFetcher:
         self.gui()
 
     def stop(self):
-        self.ws.close()
+        """
+        停止 WebSocket 连接并清理任务队列和消费者线程。
+        """
+        # 停止 WebSocket 连接
+        if hasattr(self, 'ws') and self.ws:
+            self.ws.close()
+            print("WebSocket 已停止")
+        else:
+            print("WebSocket 尚未启动")
+
+        # 清理任务队列
+        if hasattr(self, 'task_queue'):
+            with self.task_queue.mutex:
+                self.task_queue.queue.clear()  # 清空任务队列
+
+        # 停止消费者线程
+        if hasattr(self, 'consumer_thread') and self.consumer_thread.is_alive():
+            self.task_queue.put(None)  # 向任务队列发送终止信号
+            self.consumer_thread.join()  # 等待消费者线程退出
+            print("消费者线程已停止，任务队列已清空。")
+
+    def reset_timer(self):
+        """
+        重置超时计时器。如果已存在计时器，先取消，再创建新的计时器。
+        """
+        if self.timer:
+            self.timer.cancel()  # 取消之前的计时器
+
+        self.timer = threading.Timer(self.message_timeout, self._handle_timeout)
+        self.timer.start()  # 启动新的计时器
+
+    def _handle_timeout(self):
+        """
+        当超过 message_timeout 时间未收到消息时触发超时处理。
+        """
+        with self.reconnect_lock:  # 确保只有一个线程能触发重连
+            print(f"检测到超过{self.message_timeout}秒没有接收到消息，尝试重新连接...")
+            self.ws.close()  # 关闭当前 WebSocket 连接
+            self._connectWebSocket()  # 尝试重新连接
 
     @property
     def ttwid(self):
@@ -322,61 +386,50 @@ class DouyinLiveWebFetcher:
         """
         连接抖音直播间websocket服务器，请求直播间数据，支持自动重连，但最多重试三次。
         """
-        max_retries = 3  # 最大重试次数
-        retries = 0  # 当前重试次数
+        try:
+            wss = ("wss://webcast5-ws-web-hl.douyin.com/webcast/im/push/v2/?app_name=douyin_web"
+                   "&version_code=180800&webcast_sdk_version=1.0.14-beta.0"
+                   "&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web&cookie_enabled=true"
+                   "&screen_width=1536&screen_height=864&browser_language=zh-CN&browser_platform=Win32"
+                   "&browser_name=Mozilla"
+                   "&browser_version=5.0%20(Windows%20NT%2010.0;%20Win64;%20x64)%20AppleWebKit/537.36%20(KHTML,"
+                   "%20like%20Gecko)%20Chrome/126.0.0.0%20Safari/537.36"
+                   "&browser_online=true&tz_name=Asia/Shanghai"
+                   "&cursor=d-1_u-1_fh-7392091211001140287_t-1721106114633_r-1"
+                   f"&internal_ext=internal_src:dim|wss_push_room_id:{self.room_id}|wss_push_did:7319483754668557238"
+                   f"|first_req_ms:1721106114541|fetch_time:1721106114633|seq:1|wss_info:0-1721106114633-0-0|"
+                   f"wrds_v:7392094459690748497"
+                   f"&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3&endpoint=live_pc&support_wrds=1"
+                   f"&user_unique_id=7319483754668557238&im_path=/webcast/im/fetch/&identity=audience"
+                   f"&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id={self.room_id}&heartbeatDuration=0")
 
-        while retries < max_retries:
-            try:
-                wss = ("wss://webcast5-ws-web-hl.douyin.com/webcast/im/push/v2/?app_name=douyin_web"
-                       "&version_code=180800&webcast_sdk_version=1.0.14-beta.0"
-                       "&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web&cookie_enabled=true"
-                       "&screen_width=1536&screen_height=864&browser_language=zh-CN&browser_platform=Win32"
-                       "&browser_name=Mozilla"
-                       "&browser_version=5.0%20(Windows%20NT%2010.0;%20Win64;%20x64)%20AppleWebKit/537.36%20(KHTML,"
-                       "%20like%20Gecko)%20Chrome/126.0.0.0%20Safari/537.36"
-                       "&browser_online=true&tz_name=Asia/Shanghai"
-                       "&cursor=d-1_u-1_fh-7392091211001140287_t-1721106114633_r-1"
-                       f"&internal_ext=internal_src:dim|wss_push_room_id:{self.room_id}|wss_push_did:7319483754668557238"
-                       f"|first_req_ms:1721106114541|fetch_time:1721106114633|seq:1|wss_info:0-1721106114633-0-0|"
-                       f"wrds_v:7392094459690748497"
-                       f"&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3&endpoint=live_pc&support_wrds=1"
-                       f"&user_unique_id=7319483754668557238&im_path=/webcast/im/fetch/&identity=audience"
-                       f"&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id={self.room_id}&heartbeatDuration=0")
+            signature = generateSignature(wss)
+            wss += f"&signature={signature}"
 
-                signature = generateSignature(wss)
-                wss += f"&signature={signature}"
+            headers = {
+                "cookie": f"ttwid={self.ttwid}",
+                'user-agent': self.user_agent,
+            }
+            self.ws = websocket.WebSocketApp(wss,
+                                             header=headers,
+                                             on_open=self._wsOnOpen,
+                                             on_message=self._wsOnMessage,
+                                             on_error=self._wsOnError,
+                                             on_close=self._wsOnClose)
 
-                headers = {
-                    "cookie": f"ttwid={self.ttwid}",
-                    'user-agent': self.user_agent,
-                }
-                self.ws = websocket.WebSocketApp(wss,
-                                                 header=headers,
-                                                 on_open=self._wsOnOpen,
-                                                 on_message=self._wsOnMessage,
-                                                 on_error=self._wsOnError,
-                                                 on_close=self._wsOnClose)
+            print("尝试连接到 WebSocket...")
+            self.ws.run_forever()
 
-                print("尝试连接到 WebSocket...")
-                self.ws.run_forever()
-
-                # 如果连接成功，则退出循环
-                break
-
-            except Exception as e:
-                retries += 1
-                print(f"WebSocket连接异常: {e}")
-                if retries < max_retries:
-                    print(f"尝试重新连接... ({retries}/{max_retries})")
-                    time.sleep(1)  # 等待 1 秒后重试
-                else:
-                    print("达到最大重试次数，无法连接WebSocket。")
+        except Exception as e:
+            print(f"连接失败：{e}")
 
     def _wsOnOpen(self, ws):
         """
         连接建立成功
         """
         print("WebSocket connected.")
+        # 重置计时器
+        self.reset_timer()
 
     def _wsOnMessage(self, ws, message):
         """
@@ -396,6 +449,8 @@ class DouyinLiveWebFetcher:
                             payload=response.internal_ext.encode('utf-8')
                             ).SerializeToString()
             ws.send(ack, websocket.ABNF.OPCODE_BINARY)
+            # 重置计时器
+            self.reset_timer()
 
         # 根据消息类别解析消息体
         for msg in response.messages_list:
@@ -423,12 +478,38 @@ class DouyinLiveWebFetcher:
 
     def _wsOnClose(self, ws, *args):
         print("WebSocket connection closed.")
+        if self.timer:
+            self.timer.cancel()  # 取消计时器以避免触发超时处理
+
+    def _process_tasks(self):
+        """
+        消费者线程：从任务队列中取出任务并执行
+        """
+        while True:
+            try:
+                # 从队列中取任务（阻塞等待）
+                task = self.task_queue.get()
+                if task is None:  # 如果收到终止信号，则退出循环
+                    break
+
+                # 执行任务
+                task()
+                self.task_queue.task_done()  # 标记任务完成
+
+            except Exception as e:
+                print(f"处理任务时发生错误：{e}")
 
     def handle_chat_message(self, user_name, content):
-        unique_id = str(uuid.uuid4())
-        output_file = f"msic/MemberMsg_{unique_id}.mp3"
-        text = f"{user_name}说：{content}。"
-        play_speech_thread(text, output_file, v_num=0)
+        def task():
+            unique_id = str(uuid.uuid4())
+            output_file = f"msic/MemberMsg_{unique_id}.mp3"
+            text = f"{user_name}说：{content}。"
+            play_speech_thread(text, output_file, v_num=0)
+
+        try:
+            self.task_queue.put(task, timeout=1)  # 等待 1 秒尝试放入队列
+        except queue.Full:
+            print(f"任务队列已满，丢弃聊天消息：{user_name}说：{content}。")
 
     def _parseChatMsg(self, payload):
         """聊天消息"""
@@ -439,9 +520,9 @@ class DouyinLiveWebFetcher:
         print(f"【聊天msg】[{user_id}]{user_name}: {content}")
         if self.speech_enabled:
             # 如果chat_thread线程已存在并且仍在运行，则不创建新的线程
-            if self.ws_thread is not None and self.ws_thread.is_alive():
-                print("当前线程正在处理消息，跳过新线程创建。")
-                return
+            # if self.ws_thread is not None and self.ws_thread.is_alive():
+            #     print("当前线程正在处理消息，跳过新线程创建。")
+            #     return
 
             # 启动新线程处理消息
             self.ws_thread = threading.Thread(target=self.handle_chat_message, args=(user_name, content))
@@ -449,10 +530,16 @@ class DouyinLiveWebFetcher:
 
     def handle_gift_message(self, user_name, gift_name):
         # 生成唯一的语音文件名
-        unique_id = str(uuid.uuid4())
-        output_file = f"msic/MemberMsg_{unique_id}.mp3"
-        text = f"超级感谢{user_name}老板送出的{gift_name}。"
-        play_speech_thread(text, output_file, v_num=1)
+        def task():
+            unique_id = str(uuid.uuid4())
+            output_file = f"msic/GiftMsg_{unique_id}.mp3"
+            text = f"超级感谢 {user_name} 送出的 {gift_name}！"
+            play_speech_thread(text, output_file, v_num=1)
+
+        try:
+            self.task_queue.put(task, timeout=1)  # 等待 1 秒尝试放入队列
+        except queue.Full:
+            print(f"任务队列已满，丢弃聊天消息：超级感谢 {user_name} 送出的 {gift_name}！")
 
     def _parseGiftMsg(self, payload):
         """礼物消息"""
@@ -463,9 +550,9 @@ class DouyinLiveWebFetcher:
         print(f"【礼物msg】{user_name} 送出了 {gift_name}x{gift_cnt}")
         if self.gift_enabled:
             # 如果chat_thread线程已存在并且仍在运行，则不创建新的线程
-            if self.ws_thread is not None and self.ws_thread.is_alive():
-                print("当前线程正在处理消息，跳过新线程创建。")
-                return
+            # if self.ws_thread is not None and self.ws_thread.is_alive():
+            #     print("当前线程正在处理消息，跳过新线程创建。")
+            #     return
 
             # 启动新线程处理消息
             self.ws_thread = threading.Thread(target=self.handle_gift_message, args=(user_name, gift_name))
@@ -486,11 +573,17 @@ class DouyinLiveWebFetcher:
 
     def handle_welcome_message(self, user_name):
         # 生成唯一的语音文件名
-        v_num = random.randint(0, 5)
-        unique_id = str(uuid.uuid4())
-        output_file = f"msic/MemberMsg_{unique_id}.mp3"
-        text = f"欢迎{user_name} 进入了直播间。"
-        play_speech_thread(text, output_file, v_num=v_num)
+        def task():
+            unique_id = str(uuid.uuid4())
+            output_file = f"msic/WelcomeMsg_{unique_id}.mp3"
+            text = f"欢迎 {user_name} 进入直播间！"
+            play_speech_thread(text, output_file, v_num=random.randint(0, 5))
+
+        # 将任务加入队列
+        try:
+            self.task_queue.put(task, timeout=1)  # 等待 1 秒尝试放入队列
+        except queue.Full:
+            print(f"任务队列已满，丢弃聊天消息：欢迎{user_name}进入直播间！")
 
     def _parseMemberMsg(self, payload):
         '''进入直播间消息'''
@@ -500,19 +593,26 @@ class DouyinLiveWebFetcher:
         gender = ["女", "男"][message.user.gender]
         print(f"【进场msg】[{user_id}][{gender}]{user_name} 进入了直播间")
         if self.welcome_enabled:
-            if self.ws_thread is not None and self.ws_thread.is_alive():
-                print("当前线程正在处理消息，跳过新线程创建。")
-                return
+            # if self.ws_thread is not None and self.ws_thread.is_alive():
+            #     print("当前线程正在处理消息，跳过新线程创建。")
+            #     return
             # 启动新线程处理消息
             self.ws_thread = threading.Thread(target=self.handle_welcome_message, args=(user_name,))
             self.ws_thread.start()
 
     def handle_follow_message(self, user_name):
         # 生成唯一的语音文件名
-        unique_id = str(uuid.uuid4())
-        output_file = f"msic/MemberMsg_{unique_id}.mp3"
-        text = f"感谢{user_name}关注主播。"
-        play_speech_thread(text, output_file, v_num=3)
+        def task():
+            unique_id = str(uuid.uuid4())
+            output_file = f"msic/FollowMsg_{unique_id}.mp3"
+            text = f"感谢 {user_name} 关注主播！"
+            play_speech_thread(text, output_file, v_num=3)
+
+        # 将任务加入队列
+        try:
+            self.task_queue.put(task, timeout=1)  # 等待 1 秒尝试放入队列
+        except queue.Full:
+            print(f"任务队列已满，丢弃聊天消息：感谢 {user_name} 关注主播！")
 
     def _parseSocialMsg(self, payload):
         '''关注消息'''
@@ -521,9 +621,9 @@ class DouyinLiveWebFetcher:
         user_id = message.user.id
         print(f"【关注msg】[{user_id}]{user_name} 关注了主播")
         if self.follow_enabled:
-            if self.ws_thread is not None and self.ws_thread.is_alive():
-                print("当前线程正在处理消息，跳过新线程创建。")
-                return
+            # if self.ws_thread is not None and self.ws_thread.is_alive():
+            #     print("当前线程正在处理消息，跳过新线程创建。")
+            #     return
             # 启动新线程处理消息
             self.ws_thread = threading.Thread(target=self.handle_follow_message, args=(user_name,))
             self.ws_thread.start()

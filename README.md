@@ -1,8 +1,8 @@
-# 🚀 DouyinLiveTTS
+# 🚀 DouyinLivetts
 
 <div align="center">
   
-[![Stars](https://img.shields.io/github/stars/GalacticDevOps/DouyinLiveTTS?style=flat-square&logo=github)](https://github.com/GalacticDevOps/DouyinLiveTTS/stargazers)  ![Issues](https://img.shields.io/github/issues/GalacticDevOps/DouyinLiveTTS)
+[![Stars](https://img.shields.io/github/stars/xiamuceer-j/DouyinLivetts?style=flat-square&logo=github)](https://github.com/xiamuceer-j/DouyinLivetts/stargazers)  ![Issues](https://img.shields.io/github/issues/xiamuceer-j/DouyinLivetts)
 
 [中文](#-chinese) | [English](#-english)
 
@@ -16,7 +16,6 @@
 
 <img src="https://github.com/user-attachments/assets/cc2ad5ed-aeaa-4438-83f3-66b3e259d5ba" alt="image" width="400" />
 <img src="https://github.com/user-attachments/assets/74bbf805-a3d6-4fde-b34a-65aa041dd64a" alt="image" width="400" />
-
 
 </div>
 
@@ -32,12 +31,9 @@
 
 ## 安装使用
 
-```
-1. git clone
-2. 安装requirements.txt里的依赖
-3. 在main.py里面填写需要捕获的直播ID
-4. 运行main.py即可
-```
+1. [在releases中下载](https://github.com/xiamuceer-j/DouyinLivetts/releases)
+2. 运行dy-dm.exe
+3. 输入直播ID
 
 # 🌟 English
 
@@ -51,15 +47,12 @@ A simple tool for playing Tik Tok barrage
 
 ## Installation and use
 
-```
-1. git clone
-2. Install the dependencies in requirements.txt
-3. Fill in the live broadcast ID to be captured in main.py
-4. Run main.py
-```
+1. [Download from releases](https://github.com/xiamuceer-j/DouyinLivetts/releases)
+2. Run dy-dm.exe
+3. Enter the live broadcast ID
 
 ## ⭐  Star History or Repobeats
 
-[![Star History Chart](https://api.star-history.com/svg?repos=GalacticDevOps/DouyinLiveTTS&type=Date)](https://star-history.com/#GalacticDevOps/DouyinLiveTTS&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=xiamuceer-j/DouyinLivetts&type=Date)](https://star-history.com/#xiamuceer-j/DouyinLivetts&Date)
 
-![Alt](https://repobeats.axiom.co/api/embed/455110e9491daa2ebd46aa01c2e8513196592df5.svg "Repobeats analytics image")
+![Alt](https://repobeats.axiom.co/api/embed/ce8339abba891f9cba6383cc5c6ddc31411610a0.svg "Repobeats analytics image")

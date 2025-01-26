@@ -172,3 +172,5 @@ cython_debug/
 devices.py
 msic
 .idea
+output_audio
+asset

@@ -7,3 +7,13 @@ edge_tts==7.0.0
 playsound==1.2.2
 sounddevice==0.5.1
 soundfile==0.12.1
+torch
+torchaudio
+numpy<2
+vocos
+pybase16384
+vector_quantize_pytorch
+safetensors
+transformers
+numba
+cn2an
